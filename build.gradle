@@ -3,6 +3,7 @@
 buildscript {
     ext.kotlin_version = '1.6.21'
     repositories {
+        mavenLocal()
 //        google()
 //        mavenCentral()
         maven { url 'https://maven.aliyun.com/repository/public' }//central仓和jcenter仓的聚合仓
@@ -20,6 +21,7 @@ buildscript {
 
 allprojects {
     repositories {
+        mavenLocal()
 //        google()
 //        mavenCentral()
         maven { url 'https://maven.aliyun.com/repository/public' }//central仓和jcenter仓的聚合仓
