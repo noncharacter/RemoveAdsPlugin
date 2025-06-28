@@ -1,14 +1,22 @@
 package com.chenyue.cancelAds.hook
 
-import android.app.Activity
 import android.app.AndroidAppHelper
 import android.content.Context
 import android.os.Bundle
+import android.webkit.WebView
 import android.widget.Toast
 import com.chenyue.cancelAds.BuildConfig
 import com.chenyue.cancelAds.ui.MainActivity
-import de.robv.android.xposed.*
-import de.robv.android.xposed.XposedHelpers.*
+import de.robv.android.xposed.IXposedHookLoadPackage
+import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XC_MethodReplacement
+import de.robv.android.xposed.XSharedPreferences
+import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XposedHelpers
+import de.robv.android.xposed.XposedHelpers.ClassNotFoundError
+import de.robv.android.xposed.XposedHelpers.findAndHookMethod
+import de.robv.android.xposed.XposedHelpers.findClass
+import de.robv.android.xposed.XposedHelpers.setFloatField
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.net.URLDecoder
 
@@ -41,20 +49,24 @@ class WeiboHook : IXposedHookLoadPackage {
 
         val StatusClass =
             findClass("com.weico.international.model.sina.Status", classLoader)
-        findAndHookMethod("com.weico.international.utility.KotlinExtendKt",
+        val ViewHolderClass =
+            findClass("com.weico.international.activity.v4.ViewHolder", classLoader)
+        findAndHookMethod(
+            "com.weico.international.utility.KotlinExtendKt",
             classLoader,
             "isWeiboUVEAd",
             StatusClass,
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    log("isWeiboUVEAd")
+//                    log("isWeiboUVEAd")
                     param.result = false
                 }
             })
 
         val PageInfo =
             findClass("com.weico.international.model.sina.PageInfo", classLoader)
-        findAndHookMethod("com.weico.international.utility.KotlinUtilKt",
+        findAndHookMethod(
+            "com.weico.international.utility.KotlinUtilKt",
             classLoader,
             "findUVEAd",
             PageInfo,
@@ -73,34 +85,10 @@ class WeiboHook : IXposedHookLoadPackage {
                 override fun afterHookedMethod(param: MethodHookParam?) {
                     if (param != null) {
                         log("doWhatNext-" + param.result)
-                        if (param.result.equals("GDTAD")
-                            || param.result.equals("sinaAD")
-                            || param.result.equals("AD")
-                        ) {
-                            param.result = "main"
-                        }
+                        param.result = "main"
                     }
                 }
             })
-
-        try {
-            findAndHookMethod(
-                "com.weico.international.manager.ProcessMonitor",
-                classLoader,
-                "displayAd",
-                Long::class.java,
-                Activity::class.java,
-                Boolean::class.java,
-                object : XC_MethodReplacement() {
-                    override fun replaceHookedMethod(param: MethodHookParam?): Any {
-                        log("displayAd")
-                        return true
-                    }
-                }
-            )
-        } catch (e: NoSuchMethodError) {
-            log("NoSuchMethodError--com.weico.international.manager.ProcessMonitor")
-        }
 
         findAndHookMethod(
             "com.weico.international.activity.LogoActivity",
@@ -115,104 +103,46 @@ class WeiboHook : IXposedHookLoadPackage {
                 }
             })
 
-        val webviewHook = object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
-                var url = param.args[0] as String
-                log(url)
-                val sinaUrl = "://weibo.cn/sinaurl?u="
-                if (url.contains(sinaUrl)) {
-                    url = url.substring(url.indexOf(sinaUrl) + sinaUrl.length, url.length)
-                    url = URLDecoder.decode(url)
-                    log(url)
-                    param.args[0] = url
-                } else {
-                    Toast.makeText(
-                        AndroidAppHelper.currentApplication().applicationContext,
-                        "WebviewActivity-$url", Toast.LENGTH_SHORT
-                    ).show()
-                }
-                super.beforeHookedMethod(param)
-            }
-        }
         try {
             findAndHookMethod(
-                "com.weico.international.activity.WebviewActivity",
+                WebView::class.java,
+                "loadUrl",
+                String::class.java,
+                buildWebviewHook(0)
+            )
+        } catch (e: NoSuchMethodError) {
+            log("NoSuchMethodError--android.webkit.WebView#loadUrl")
+        } catch (e: ClassNotFoundError) {
+            log("ClassNotFoundError--android.webkit.WebView#loadUrl")
+        }
+
+        runCatching {
+            findAndHookMethod(
+                "com.sina.wbs.webkit.WebView",
                 classLoader,
                 "loadUrl",
                 String::class.java,
-                webviewHook
+                buildWebviewHook(0)
             )
-        } catch (e: NoSuchMethodError) {
-            log("NoSuchMethodError--com.weico.international.activity.WebviewActivity.loadUrl")
-        } catch (e: ClassNotFoundError) {
-            log("ClassNotFoundError--com.weico.international.activity.WebviewActivity.loadUrl")
+        }.onFailure {
+            log("com.sina.wbs.webkit.WebView#loadUrl, ${it.message}")
         }
-        try {
+
+        runCatching {
             findAndHookMethod(
-                "com.weico.international.activity.WebviewSimpleActivity",
+                "com.weico.international.browser.BrowserManager",
                 classLoader,
                 "loadUrl",
+                Context::class.java,
                 String::class.java,
-                webviewHook
+                buildWebviewHook(1)
             )
-        } catch (e: NoSuchMethodError) {
-            log("NoSuchMethodError--com.weico.international.activity.WebviewSimpleActivity.loadUrl")
-        } catch (e: ClassNotFoundError) {
-            log("ClassNotFoundError--com.weico.international.activity.WebviewSimpleActivity.loadUrl")
+        }.onFailure {
+            log("com.weico.international.browser.BrowserManager#loadUrl, ${it.message}")
         }
 
         findAndHookMethod(
-            "com.sina.wbs.webkit.WebView",
-            classLoader,
-            "loadUrl",
-            String::class.java,
-            object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    var url = param.args[0] as String
-                    log(url)
-                    val sinaUrl = "://weibo.cn/sinaurl?u="
-                    if (url.contains(sinaUrl)) {
-                        url = url.substring(url.indexOf(sinaUrl) + sinaUrl.length, url.length)
-                        url = URLDecoder.decode(url)
-                        log(url)
-                        param.args[0] = url
-                    } else {
-                        Toast.makeText(
-                            AndroidAppHelper.currentApplication().applicationContext,
-                            "WebView-$url", Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                    super.beforeHookedMethod(param)
-                }
-            })
-
-        findAndHookMethod(
-            "com.weico.international.browser.BrowserManager",
-            classLoader,
-            "loadUrl",
-            Context::class.java,
-            String::class.java,
-            object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    var url = param.args[1] as String
-                    log(url)
-                    val sinaUrl = "://weibo.cn/sinaurl?u="
-                    if (url.contains(sinaUrl)) {
-                        url = url.substring(url.indexOf(sinaUrl) + sinaUrl.length, url.length)
-                        url = URLDecoder.decode(url)
-                        log(url)
-                        param.args[1] = url
-                    } else {
-                        Toast.makeText(
-                            AndroidAppHelper.currentApplication().applicationContext,
-                            "BrowserManager-$url", Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                    super.beforeHookedMethod(param)
-                }
-            })
-
-        findAndHookMethod("com.weico.international.activity.v4.Setting",
+            "com.weico.international.activity.v4.Setting",
             classLoader,
             "loadBoolean",
             String::class.java,
@@ -285,26 +215,14 @@ class WeiboHook : IXposedHookLoadPackage {
         try {
             findAndHookMethod(
                 "com.weico.international.api.RxApiKt", classLoader,
-                "queryUveAdRequest\$lambda-178",
+                "queryUveAdRequest\$lambda$153",
                 findClass("java.util.Map", classLoader),
                 queryUveAdRequestHook
             )
         } catch (e: NoSuchMethodError) {
-            log("NoSuchMethodError--com.weico.international.api.RxApiKt.queryUveAdRequest\$lambda-178")
+            log("NoSuchMethodError--com.weico.international.api.RxApiKt.queryUveAdRequest\$lambda-153")
         } catch (e: ClassNotFoundError) {
-            log("ClassNotFoundError--com.weico.international.api.RxApiKt.queryUveAdRequest\$lambda-178")
-        }
-        try {
-            findAndHookMethod(
-                "com.weico.international.api.RxApiKt", classLoader,
-                "queryUveAdRequest\$lambda-153",
-                findClass("java.util.Map", classLoader),
-                queryUveAdRequestHook
-            )
-        } catch (e: NoSuchMethodError) {
-            log("NoSuchMethodError--com.weico.international.api.RxApiKt.queryUveAdRequest\$lambda-178")
-        } catch (e: ClassNotFoundError) {
-            log("ClassNotFoundError--com.weico.international.api.RxApiKt.queryUveAdRequest\$lambda-178")
+            log("ClassNotFoundError--com.weico.international.api.RxApiKt.queryUveAdRequest\$lambda-153")
         }
         findAndHookMethod(
             "com.weico.international.video.AbsPlayer", classLoader,
@@ -321,7 +239,8 @@ class WeiboHook : IXposedHookLoadPackage {
             }
         )
 
-        findAndHookMethod("com.weico.international.data.VideoModalOTO", classLoader,
+        findAndHookMethod(
+            "com.weico.international.data.VideoModalOTO", classLoader,
             "getDownloadAble",
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
@@ -331,7 +250,8 @@ class WeiboHook : IXposedHookLoadPackage {
         )
 
         try {
-            findAndHookMethod("com.weico.international.model.weico.Account", classLoader,
+            findAndHookMethod(
+                "com.weico.international.model.weico.Account", classLoader,
                 "isVip",
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
@@ -366,11 +286,65 @@ class WeiboHook : IXposedHookLoadPackage {
             log("ClassNotFoundError--com.sina.push.service.PushAlarmManager#a(int, long, long)")
         }
 
+        runCatching {
+            findAndHookMethod(
+                "com.weico.international.adapter.TimelineHelper", classLoader,
+                "displayAd",
+                StatusClass,
+                ViewHolderClass,
+                Int::class.java,
+                Boolean::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        log("displayAd")
+                        param.result = null
+                    }
+                }
+            )
+        }.onFailure {
+            log("com.weico.international.adapter.TimelineHelper#displayAd, ${it.message}")
+        }
+
+        runCatching {
+            findAndHookMethod(
+                "com.sina.weibo.ad.h", classLoader,
+                "getAdInfo",
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        log("com.sina.weibo.ad.h#getAdInfo")
+                        param.result = null
+                    }
+                }
+            )
+        }.onFailure {
+            log("com.sina.weibo.ad.h#getAdInfo, ${it.message}")
+        }
     }
 
     private fun log(log: String) {
         if (BuildConfig.DEBUG) {
             XposedBridge.log("$TAG-$log")
+        }
+    }
+
+    private fun buildWebviewHook(index: Int): XC_MethodHook {
+        return object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                var url = param.args[index] as String
+                log("url:$url")
+                val sinaUrl = "://weibo.cn/sinaurl?u="
+                if (url.contains(sinaUrl)) {
+                    url = url.substring(url.indexOf(sinaUrl) + sinaUrl.length, url.length)
+                    url = URLDecoder.decode(url)
+                    log("true url:$url")
+                    param.args[index] = url
+                } else {
+                    Toast.makeText(
+                        AndroidAppHelper.currentApplication().applicationContext,
+                        "WebviewActivity-$url", Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
     }
 }
